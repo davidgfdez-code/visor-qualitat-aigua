@@ -4,8 +4,6 @@ console.log("🟦 app.js carregat (AquaCheck v2)", new Date().toISOString());
 const DATA_ZONES = "./data/ZONES_ABAST.geojson";
 const DATA_RESULTS = "./data/resultats.csv";
 
-const WARN_RATIO = 0.8;
-
 const CENTER = [41.045, 0.93];
 const START_ZOOM = 12;
 
@@ -24,10 +22,10 @@ const INDICADORS = [
 function normalizeText(s) {
   return String(s || "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // tildes
-    .replace(/['’`]/g, "")           // apóstrofes
-    .replace(/-/g, " ")              // guiones = espacios
-    .replace(/\s+/g, " ")            // sin espacios dobles
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['’`]/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
     .trim()
     .toUpperCase();
 }
@@ -60,7 +58,65 @@ const TERB_KEY = normalizeText("Terbolesa");
 const CLORURS_KEY = normalizeText("Clorurs");
 const DURESA_KEY = normalizeText("Duresa");
 const PH_KEY = normalizeText("pH");
-const ALWAYS_OK = new Set([]);
+const CLOR_LLIURE_KEY = normalizeText("Clor lliure");
+
+const LIMITS = {
+  [COND_KEY]: {
+    limit_min: null,
+    limit_max: 2500,
+    no_apta_min: null,
+    no_apta_max: 4000,
+    geo_note: true
+  },
+
+  [PH_KEY]: {
+    limit_min: 6.5,
+    limit_max: 9.5,
+    no_apta_min: 4.5,
+    no_apta_max: 10,
+    geo_note: false
+  },
+
+  [TERB_KEY]: {
+    limit_min: null,
+    limit_max: 4,
+    no_apta_min: null,
+    no_apta_max: 6,
+    geo_note: false
+  },
+
+  [CLOR_LLIURE_KEY]: {
+    limit_min: null,
+    limit_max: null,
+    no_apta_min: null,
+    no_apta_max: 5,
+    geo_note: false
+  },
+
+  [NITRATS_KEY]: {
+    limit_min: null,
+    limit_max: 50,
+    no_apta_min: null,
+    no_apta_max: 50,
+    geo_note: false
+  },
+
+  [DURESA_KEY]: {
+    limit_min: null,
+    limit_max: 500,
+    no_apta_min: null,
+    no_apta_max: null,
+    geo_note: true
+  },
+
+  [CLORURS_KEY]: {
+    limit_min: null,
+    limit_max: 250,
+    no_apta_min: null,
+    no_apta_max: null,
+    geo_note: true
+  }
+};
 
 function zonaFromProps(props) {
   return String(
@@ -199,12 +255,97 @@ function hasUsableValue(row) {
   return toNumber(valorTxt) !== null;
 }
 
-function estatDeFila(row) { // Semáforo
+function getLimits(row) {
+  const p = normalizeText(row.parametre || "");
+  return LIMITS[p] || {
+    limit_min: null,
+    limit_max: null,
+    no_apta_min: null,
+    no_apta_max: null,
+    geo_note: false
+  };
+}
+
+function isOutOfAsteriskLimit(row) {
+  const v = toNumber(row.valor);
+  if (v === null) return false;
+
+  const limits = getLimits(row);
+
+  if (limits.limit_min !== null && v < limits.limit_min) return true;
+  if (limits.limit_max !== null && v > limits.limit_max) return true;
+
+  return false;
+}
+
+function isOutOfDisplayLimit(row) {
+  const v = toNumber(row.valor);
+  if (v === null) return false;
+
+  const limits = getLimits(row);
+  if (!limits.geo_note) return false;
+
+  if (limits.limit_min !== null && v < limits.limit_min) return true;
+  if (limits.limit_max !== null && v > limits.limit_max) return true;
+
+  return false;
+}
+
+function isOutOfNoAptaNumericLimit(row) {
+  const p = normalizeText(row.parametre || "");
+  const v = toNumber(row.valor);
+
+  if (v === null) return false;
+
+  // Conductivitat: no apta si supera 4.000 µS/cm
+  if (p === COND_KEY) {
+    return v > 4000;
+  }
+
+  // pH: no apta si és inferior a 4,5 o superior a 10
+  if (p === PH_KEY) {
+    return v < 4.5 || v > 10;
+  }
+
+  // Terbolesa: no apta si supera 6 UNF
+  if (p === TERB_KEY) {
+    return v > 6;
+  }
+
+  // Clor lliure: no apta si supera 5,0 mg/L
+  // 5,0 exacte no marca no aptitud; 5,01 sí.
+  if (p === CLOR_LLIURE_KEY) {
+    return v > 5;
+  }
+
+  // Nitrats: no apta si supera 50 mg/L
+  if (p === NITRATS_KEY) {
+    return v > 50;
+  }
+
+  return false;
+}
+
+function isNoAptaSemafor(row) {
   const p = normalizeText(row.parametre || "");
   const valorTxt = normalizeText(row.valor || "");
 
-   if (p === MICRO_KEY || p === ORG_KEY) {
-    if (valorTxt === "INCORRECTE") return "bad";
+  // En Microbiologia i Organolèptic, Incorrecte fa NO APTA,
+  // però no mostra el missatge de límits de no aptitud.
+  if (p === MICRO_KEY || p === ORG_KEY) {
+    return valorTxt === "INCORRECTE";
+  }
+
+  return isOutOfNoAptaNumericLimit(row);
+}
+
+function estatDeFila(row) {
+  if (isNoAptaSemafor(row)) return "bad";
+
+  const p = normalizeText(row.parametre || "");
+  const valorTxt = normalizeText(row.valor || "");
+
+  if (p === MICRO_KEY || p === ORG_KEY) {
     if (valorTxt === "CORRECTE") return "ok";
     return "na";
   }
@@ -212,36 +353,17 @@ function estatDeFila(row) { // Semáforo
   const v = toNumber(row.valor);
   if (v === null) return "na";
 
-    if (p === PH_KEY) {
-    const min = row.limit_min ? toNumber(row.limit_min) : null;
-    const max = row.limit_max ? toNumber(row.limit_max) : null;
-
-    if ((min !== null && v < min) || (max !== null && v > max)) {
-      return "bad";
-    }
-    return "ok";
-  }
-
-    const max = row.limit_max ? toNumber(row.limit_max) : null;
-
-  if (max !== null && v > max) {
-    if (p === NITRATS_KEY || p === TERB_KEY) return "bad";
-    return "warn";
-  }
-
   return "ok";
 }
 
 function colorSemafor(estat) {
   if (estat === "bad") return "#B7791F";
   if (estat === "ok") return "#3A9B6A";
-  if (estat === "warn") return "#3A9B6A";
   return "#7A8691";
 }
 
 function labelSemafor(estat) {
   if (estat === "ok") return "APTA PER AL CONSUM";
-  if (estat === "warn") return "APTA PER AL CONSUM, amb incidències";
   if (estat === "bad") return "NO APTA PER AL CONSUM";
   return "SENSE DADES";
 }
@@ -546,13 +668,12 @@ function calcularSemaforZona(files) {
   if (!rowsByIndicador.length) return "na";
 
   if (rowsByIndicador.some((r) => estatDeFila(r) === "bad")) return "bad";
-  if (rowsByIndicador.some((r) => estatDeFila(r) === "warn")) return "warn";
   if (rowsByIndicador.some((r) => estatDeFila(r) === "ok")) return "ok";
 
   return "na";
 }
 
-function formatParametre(raw) { // Cambio de etiqueta del popup independiente del csv
+function formatParametre(raw) {
   const norm = normalizeText(raw);
   if (norm === ORG_KEY) return "Olor, gust i color";
   if (norm === MICRO_KEY) return "Qualitat microbiològica";
@@ -570,6 +691,7 @@ function buildPopupHTML(zonaNom, estat, files) {
   const label = labelSemafor(estat);
   const latestMap = getLatestIndicadorsMap(files);
   let showGeoNote = false;
+  let showNoAptaNote = false;
 
   const rows = INDICADORS.map((ind) => {
     const r = latestMap.get(normalizeText(ind.key));
@@ -588,22 +710,43 @@ function buildPopupHTML(zonaNom, estat, files) {
 
     const estatFila = estatDeFila(r);
     const hasAsterisk = isOutOfAsteriskLimit(r);
+    const isNoAptaNumeric = isOutOfNoAptaNumericLimit(r);
     const markGeoValue = isOutOfDisplayLimit(r);
 
-    if (markGeoValue) {
-      showGeoNote = true;
-    }
+    if (markGeoValue) showGeoNote = true;
+    if (isNoAptaNumeric) showNoAptaNote = true;
+
+    const valueMark = isNoAptaNumeric ? "**" : (hasAsterisk ? "*" : "");
+    const valueClass = (markGeoValue || isNoAptaNumeric) ? " geo-mark" : "";
 
     return `
       <div class="row popup-row ${estatFila}">
         <span class="label">${formatParametre(ind.key)}</span>
-        <span class="value${markGeoValue ? " geo-mark" : ""}">${r.valor}${unit}${hasAsterisk ? "*" : ""}</span>
+        <span class="value${valueClass}">${r.valor}${unit}${valueMark}</span>
         <span class="date">${dataParam}</span>
       </div>`;
   }).join("");
 
   const geoNoteHTML = showGeoNote
-    ? `<div class="popup-note">* Valors condicionats per la naturalesa geològica dels terrenys que travessa el recurs hídric.</div>`
+    ? `
+      <div class="popup-note">
+        <div class="popup-note-inner">
+          <span class="popup-note-mark">*</span>
+          <span class="popup-note-text">Valor condicionat per la naturalesa geològica del terreny pel qual travessa l'aqüífer.</span>
+        </div>
+      </div>
+    `
+    : "";
+
+  const noAptaNoteHTML = showNoAptaNote
+    ? `
+      <div class="popup-note popup-note-noapta">
+        <div class="popup-note-inner">
+          <span class="popup-note-mark">**</span>
+          <span class="popup-note-text">Valor fora dels límits de no aptitud segons RD 3/2023.</span>
+        </div>
+      </div>
+    `
     : "";
 
   return `
@@ -622,59 +765,16 @@ function buildPopupHTML(zonaNom, estat, files) {
     </div>
 
     ${geoNoteHTML}
+    ${noAptaNoteHTML}
+
+    <div class="popup-footer">
+      Les dates mostrades corresponen a la darrera mostra disponible per a cada paràmetre.
+    </div>
 
     <div class="popup-footer">
       Dades informatives. Per a obtenir més informació, consulta la plataforma SINAC.
     </div>
   </div>`;
-}
-
-function isOutOfAsteriskLimit(row) {
-  const p = normalizeText(row.parametre || "");
-
-  if (
-    p !== COND_KEY &&
-    p !== DURESA_KEY &&
-    p !== CLORURS_KEY &&
-    p !== NITRATS_KEY
-  ) {
-    return false;
-  }
-
-  const v = toNumber(row.valor);
-  if (v === null) return false;
-
-  if (p === NITRATS_KEY) {
-    const max = row.limit_max ? toNumber(row.limit_max) : null;
-    return max !== null && v > max;
-  }
-
-  const min = (row.limit_min !== "" && row.limit_min != null) ? toNumber(row.limit_min) : null;
-  const max = (row.limit_max !== "" && row.limit_max != null) ? toNumber(row.limit_max) : null;
-
-  if (min !== null && v < min) return true;
-  if (max !== null && v > max) return true;
-
-  return false;
-}
-
-function isOutOfDisplayLimit(row) {
-  const p = normalizeText(row.parametre || "");
-
-  if (p !== COND_KEY && p !== DURESA_KEY && p !== CLORURS_KEY) {
-    return false;
-  }
-
-  const v = toNumber(row.valor);
-  if (v === null) return false;
-
-  const min = (row.limit_min !== "" && row.limit_min != null) ? toNumber(row.limit_min) : null;
-  const max = (row.limit_max !== "" && row.limit_max != null) ? toNumber(row.limit_max) : null;
-
-  if (min !== null && v < min) return true;
-  if (max !== null && v > max) return true;
-
-  return false;
 }
 
 function selectEntry(entry, clickLatLng) {
@@ -686,25 +786,46 @@ function selectEntry(entry, clickLatLng) {
     [];
 
   const estat = calcularSemaforZona(files);
-
   const popupLatLng = clickLatLng || (entry.bounds ? entry.bounds.getCenter() : null);
   if (!popupLatLng) return;
-
-  const headerH = document.querySelector(".header")?.offsetHeight || 0;
 
   popupOpenTimer = setTimeout(() => {
     popupActiu = L.popup({
       closeButton: true,
-      autoPan: true,
+      autoPan: false,
       keepInView: false,
-      maxWidth: 360,
-      autoPanPaddingTopLeft: [110, headerH + 24],
-      autoPanPaddingBottomRight: [24, 24],
-      autoPanPadding: [24, 24]
+      maxWidth: 360
     })
-    .setLatLng(popupLatLng)
-    .setContent(buildPopupHTML(entry.zonaRaw, estat, files))
-    .openOn(map);
+      .setLatLng(popupLatLng)
+      .setContent(buildPopupHTML(entry.zonaRaw, estat, files))
+      .openOn(map);
+
+    requestAnimationFrame(() => {
+      const popupEl = popupActiu && popupActiu.getElement();
+      if (!popupEl) return;
+
+      const popupHeight = popupEl.offsetHeight || 0;
+      const mapSize = map.getSize();
+      const anchorPoint = map.latLngToContainerPoint(popupLatLng);
+
+      // Leaflet ancla el popup por abajo-centro.
+      // Queremos que el centro visual del popup quede más o menos en el centro del mapa.
+      const popupVisualCenterY = anchorPoint.y - popupHeight / 2;
+      const desiredCenterY = mapSize.y / 2 - 20;
+
+      const dy = popupVisualCenterY - desiredCenterY;
+
+      // Mantener centrado horizontal también
+      const desiredCenterX = mapSize.x / 2;
+      const dx = anchorPoint.x - desiredCenterX;
+
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        map.panBy([dx, dy], {
+          animate: true,
+          duration: 0.45
+        });
+      }
+    });
 
     popupOpenTimer = null;
   }, 1600);
@@ -753,10 +874,7 @@ function buildResultsIndex(rows) {
   resultatsxZona = new Map();
 
   for (const r of rows) {
-    let zona = getField(r, [
-      "zona", "Zona", "ZONA"
-    ]);
-
+    let zona = getField(r, ["zona", "Zona", "ZONA"]);
     zona = zona.replace(/^\uFEFF/, "").replace(/"/g, "").trim();
 
     const key = normalizeText(zona);
@@ -782,18 +900,7 @@ function buildResultsIndex(rows) {
       unitat: getField(r, [
         "unitat", "Unitat", "UNITAT",
         "unidad", "Unidad", "UNIDAD"
-      ]),
-      limit_min: getField(r, [
-        "limit_min", "Limit Min",
-        "limit mínim", "Limit mínim",
-        "Minim", "Mínim", "Minimo", "Mínimo"
-      ]),
-      limit_max: getField(r, [
-        "limit_max", "Limit Max",
-        "limit maxim", "Limit màxim",
-        "Maxim", "Màxim", "Maximo", "Máximo",
-        "Limit", "LIMIT"
-      ]),
+      ])
     };
 
     if (!row.parametre) continue;
@@ -837,7 +944,7 @@ function buildResultsIndex(rows) {
 
         if (dates.length) {
           const maxDate = new Date(Math.max(...dates));
-          updatedAt.textContent = "Última actualització: " + maxDate.toLocaleDateString("ca-ES");
+          updatedAt.textContent = "Data de la darrera actualització: " + formatData(maxDate);
         }
       }
     } catch (err) {
