@@ -491,6 +491,41 @@ const ResetViewControl = L.Control.extend({
 });
 map.addControl(new ResetViewControl());
 
+const OpenWindowControl = L.Control.extend({
+  options: { position: "topleft" },
+
+  onAdd: function () {
+    const container = L.DomUtil.create("div", "leaflet-bar aquacheck-open-window");
+    const a = L.DomUtil.create("a", "", container);
+
+    a.href = "#";
+    a.title = "Obrir el visor en una finestra nova";
+    a.setAttribute("aria-label", "Obrir el visor en una finestra nova");
+    a.innerHTML = "⛶";
+
+    L.DomEvent.disableClickPropagation(container);
+
+    L.DomEvent.on(a, "click", (e) => {
+      L.DomEvent.preventDefault(e);
+
+      const w = Math.round(window.screen.availWidth * 0.70);
+      const h = Math.round(window.screen.availHeight * 0.70);
+      const left = Math.round((window.screen.availWidth - w) / 2);
+      const top = Math.round((window.screen.availHeight - h) / 2);
+
+      window.open(
+        window.location.href,
+        "visorQualitatAigua",
+        `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes,noopener,noreferrer`
+      );
+    });
+
+    return container;
+  },
+});
+
+map.addControl(new OpenWindowControl());
+
 const DROP_ICON_URL = "./assets/gota.png";
 
 const waterDivIcon = L.divIcon({
