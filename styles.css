@@ -110,6 +110,7 @@ body{
 .layout--full{
   width: 100%;
   height: calc(100vh - var(--header-h));
+  background: transparent !important;
 }
 
 #map{
