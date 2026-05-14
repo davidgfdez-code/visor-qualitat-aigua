@@ -11,6 +11,10 @@ html, body {
   background: transparent;
 }
 
+body{
+  overflow: hidden;
+}
+
 :root{
   --header-h: 80px;
   --brand: #019BDE;
