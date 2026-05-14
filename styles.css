@@ -52,6 +52,7 @@ html, body {
   align-items: center;
   overflow: hidden;
   border-radius: 16px;
+  transform: translateY(6px);
   background: #f3fbff;
   box-shadow:
     0 0 10px 5px rgba(243,251,255,.70),
